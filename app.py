@@ -136,11 +136,16 @@ if cuisine != "All":
 prev = period_metrics(previous) if not previous.empty else None
 
 
-def delta(key, inverse=False):
+def delta(key):
     if not prev or prev[key] == 0:
         return None
-    change = (current[key] / prev[key] - 1) * 100
-    return -change if inverse else change
+    return (current[key] / prev[key] - 1) * 100
+
+
+def pp_delta(key):
+    if not prev:
+        return None
+    return current[key] - prev[key]
 
 
 st.caption(f"Showing {start_date:%d %b %Y} – {end_date:%d %b %Y}  •  Previous period: {previous_start:%d %b} – {previous_end:%d %b %Y}")
@@ -150,9 +155,9 @@ k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("Orders", f"{current['orders']:,}", f"{delta('orders'):+.1f}%" if delta('orders') is not None else None)
 k2.metric("GMV", money(current["gmv"]), f"{delta('gmv'):+.1f}%" if delta('gmv') is not None else None)
 k3.metric("AOV", money(current["aov"]), f"{delta('aov'):+.1f}%" if delta('aov') is not None else None)
-k4.metric("Cancellation", pct(current["cancel"]), f"{delta('cancel', inverse=True):+.1f}%" if delta('cancel', inverse=True) is not None else None)
-k5.metric("Delivery rate", pct(current["delivery"]), f"{delta('delivery'):+.1f}%" if delta('delivery') is not None else None)
-k6.metric("≤45 min SLA", pct(current["sla"]), f"{delta('sla'):+.1f}%" if delta('sla') is not None else None)
+k4.metric("Cancellation", pct(current["cancel"]), f"{pp_delta('cancel'):+.2f} pp" if pp_delta('cancel') is not None else None, delta_color="inverse")
+k5.metric("Delivery rate", pct(current["delivery"]), f"{pp_delta('delivery'):+.2f} pp" if pp_delta('delivery') is not None else None)
+k6.metric("≤45 min SLA", pct(current["sla"]), f"{pp_delta('sla'):+.2f} pp" if pp_delta('sla') is not None else None)
 
 st.caption("Decision framework: metric → trend → segmentation → insight → recommendation")
 tabs = st.tabs([
@@ -191,20 +196,28 @@ with tabs[0]:
     with a:
         fig = px.line(daily, x="date", y=["orders", "orders_7d"], title="Daily orders")
         fig.update_layout(height=300, legend_title_text="")
+        fig.update_yaxes(title_text="Orders")
+        fig.for_each_trace(lambda trace: trace.update(name="Daily orders" if trace.name == "orders" else "7-day average"))
         st.plotly_chart(fig, use_container_width=True)
     with b:
         fig = px.line(daily, x="date", y=["gmv", "gmv_7d"], title="Daily GMV")
         fig.update_layout(height=300, legend_title_text="")
+        fig.update_yaxes(title_text="GMV (₹)", tickprefix="₹", tickformat=",.0f")
+        fig.for_each_trace(lambda trace: trace.update(name="Daily GMV" if trace.name == "gmv" else "7-day average"))
         st.plotly_chart(fig, use_container_width=True)
 
     a, b = st.columns(2)
     with a:
         fig = px.line(daily, x="date", y=["cancellation_rate", "cancel_7d"], title="Cancellation rate")
         fig.update_layout(height=300, legend_title_text="")
+        fig.update_yaxes(title_text="Cancellation rate (%)")
+        fig.for_each_trace(lambda trace: trace.update(name="Daily cancellation rate" if trace.name == "cancellation_rate" else "7-day average"))
         st.plotly_chart(fig, use_container_width=True)
     with b:
         fig = px.line(daily, x="date", y=["avg_eta", "eta_7d"], title="Average ETA")
         fig.update_layout(height=300, legend_title_text="")
+        fig.update_yaxes(title_text="ETA (min)")
+        fig.for_each_trace(lambda trace: trace.update(name="Daily ETA" if trace.name == "avg_eta" else "7-day average"))
         st.plotly_chart(fig, use_container_width=True)
 
     peak = daily.loc[daily.orders.idxmax()]
@@ -236,6 +249,13 @@ with tabs[1]:
             ev = ev[ev.cuisine == cuisine]
 
         stages = ["session_start", "menu_view", "add_to_cart", "checkout", "order"]
+        stage_labels = {
+            "session_start": "Session start",
+            "menu_view": "Menu view",
+            "add_to_cart": "Add to cart",
+            "checkout": "Checkout",
+            "order": "Order",
+        }
         counts = (
             ev[ev.event_name.isin(stages)]
             .groupby("event_name")["session_id"]
@@ -244,24 +264,29 @@ with tabs[1]:
             .fillna(0)
         )
         funnel = pd.DataFrame({"stage": stages, "sessions": counts.values})
+        funnel["stage_label"] = funnel["stage"].map(stage_labels)
         funnel["conversion"] = funnel.sessions.div(funnel.sessions.shift(1)).fillna(1) * 100
         funnel["drop_off"] = 100 - funnel.conversion
         funnel["overall_conversion"] = funnel.sessions.div(funnel.sessions.iloc[0]) * 100
 
-        fig = px.funnel(funnel, y="stage", x="sessions", title="Customer journey funnel")
+        fig = px.funnel(funnel, y="stage_label", x="sessions", title="Customer journey funnel")
         fig.update_layout(height=360)
+        fig.update_yaxes(title_text="Stage")
+        fig.update_xaxes(title_text="Sessions")
         st.plotly_chart(fig, use_container_width=True)
 
         view = funnel.copy()
         view["conversion"] = view.conversion.round(1)
         view["drop_off"] = view.drop_off.round(1)
         view["overall_conversion"] = view.overall_conversion.round(1)
+        view["stage"] = view["stage_label"]
+        view = view[["stage", "sessions", "conversion", "drop_off", "overall_conversion"]]
         view.columns = ["Stage", "Sessions", "Stage conversion %", "Drop-off %", "Overall conversion %"]
         st.dataframe(view, use_container_width=True, hide_index=True)
 
         leak = funnel.iloc[1:].sort_values("conversion").iloc[0]
         st.info(
-            f"**Largest leakage:** {leak.stage.replace('_', ' ').title()} retains **{leak.conversion:.1f}%** of the previous stage. Investigate UX, fee visibility and availability before changing acquisition spend."
+            f"**Largest leakage:** {leak.stage_label} retains **{leak.conversion:.1f}%** of the previous stage. Investigate UX, fee visibility and availability before changing acquisition spend."
         )
     else:
         st.warning("Funnel data is missing. Run `python generate_data.py` after pulling the latest repository.")
@@ -269,14 +294,19 @@ with tabs[1]:
     hourly = filtered.groupby("hour", as_index=False).agg(orders=("order_id", "count"), gmv=("revenue", "sum"))
     fig = px.bar(hourly, x="hour", y="orders", title="Orders by hour of day")
     fig.update_layout(height=300)
+    fig.update_xaxes(title_text="Hour of day")
+    fig.update_yaxes(title_text="Orders")
     st.plotly_chart(fig, use_container_width=True)
     peak_hour = int(hourly.loc[hourly.orders.idxmax(), "hour"])
-    st.info(f"**Demand signal:** {peak_hour}:00 is the busiest hour. Use this window for capacity planning and controlled promotions.")
+    peak_orders = int(hourly.loc[hourly.orders.idxmax(), "orders"])
+    st.info(f"**Demand signal:** {peak_hour:02d}:00 is the busiest hour with **{peak_orders:,} orders**. Prioritize rider and restaurant capacity during this peak window.")
 
     try:
         fc = forecast_next_24(orders)
         fig = px.line(fc, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast")
         fig.update_layout(height=300)
+        fig.update_xaxes(title_text="Forecast hour")
+        fig.update_yaxes(title_text="Forecast orders")
         st.plotly_chart(fig, use_container_width=True)
     except Exception:
         pass
