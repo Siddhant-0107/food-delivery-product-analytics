@@ -302,7 +302,7 @@ with tabs[1]:
         fig = px.line(fc, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast")
         fig.update_layout(height=300)
         fig.update_xaxes(title_text="Forecast hour")
-        fig.update_yaxes(title_text="Forecast orders")
+        fig.update_yaxes(title_text="Forecast orders", tickformat=",.0f")
         st.plotly_chart(fig, use_container_width=True)
 
 with tabs[2]:
