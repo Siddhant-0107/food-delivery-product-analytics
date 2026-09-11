@@ -48,20 +48,11 @@ def build_hourly_series(orders: pd.DataFrame) -> pd.DataFrame:
     hourly["rolling_24"] = hourly["orders"].shift(1).rolling(24).mean()
     hourly["rolling_168"] = hourly["orders"].shift(1).rolling(168).mean()
 
-    # Recent same-hour demand baseline, using only prior days.
-    hourly["date"] = hourly["order_ts"].dt.date
-    by_hour_day = hourly.groupby(["date", "hour"], as_index=False)["orders"].mean()
-    by_hour_day["hour_mean_7d"] = by_hour_day.groupby("hour")["orders"].transform(
-        lambda s: s.shift(1).rolling(7, min_periods=2).mean()
+    # Prior 7 observed occurrences of the same hour-of-day.
+    hourly["hour_mean_7d"] = (
+        hourly.groupby("hour")["orders"]
+        .transform(lambda s: s.shift(1).rolling(7, min_periods=2).mean())
     )
-    hourly = hourly.merge(
-        by_hour_day[["date", "hour", "hour_mean_7d"]],
-        on=["date", "hour"],
-        how="left",
-        suffixes=("", "_hist"),
-    )
-    hourly["hour_mean_7d"] = hourly["hour_mean_7d_hist"]
-    hourly.drop(columns=["hour_mean_7d_hist", "date"], inplace=True)
 
     return hourly.dropna().reset_index(drop=True)
 
@@ -103,10 +94,9 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
     features = artifact.get("features", FEATURES)
 
     hourly = build_hourly_series(orders)
-    history = hourly[["order_ts", "orders"]].copy()
+    history = hourly[["order_ts", "orders", "hour"]].copy()
 
-    # Same-hour baselines from the last seven observed occurrences of each hour.
-    history["hour"] = history["order_ts"].dt.hour
+    # Same-hour demand baseline from the last seven observed days.
     recent_by_hour = {}
     for hour in range(24):
         recent = history.loc[history["hour"] == hour, "orders"].tail(7)
@@ -134,16 +124,9 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
 
         model_pred = float(model.predict(pd.DataFrame([row])[features])[0])
         baseline = recent_by_hour.get(current_hour, float(vals.mean()))
-
-        # Blend the learned model with the empirical same-hour baseline so that
-        # the forecast preserves the observed daily demand profile.
-        pred = 0.5 * model_pred + 0.5 * baseline
-        pred = max(pred, 0.0)
+        pred = max(0.5 * model_pred + 0.5 * baseline, 0.0)
 
         rows.append({"order_ts": ts, "forecast_orders": pred})
-        history = pd.concat(
-            [history, pd.DataFrame([{ "order_ts": ts, "orders": pred, "hour": current_hour }])],
-            ignore_index=True,
-        )
+        history.loc[len(history)] = [ts, pred, current_hour]
 
     return pd.DataFrame(rows)
