@@ -20,7 +20,6 @@ FEATURES = [
     "lag_168",
     "rolling_24",
     "rolling_168",
-    "hour_mean_7d",
 ]
 
 
@@ -41,29 +40,24 @@ def build_hourly_series(orders: pd.DataFrame) -> pd.DataFrame:
     hourly["day"] = hourly["order_ts"].dt.day
     hourly["month"] = hourly["order_ts"].dt.month
     hourly["is_weekend"] = (hourly["dow"] >= 5).astype(int)
-
     hourly["lag_1"] = hourly["orders"].shift(1)
     hourly["lag_24"] = hourly["orders"].shift(24)
     hourly["lag_168"] = hourly["orders"].shift(168)
     hourly["rolling_24"] = hourly["orders"].shift(1).rolling(24).mean()
     hourly["rolling_168"] = hourly["orders"].shift(1).rolling(168).mean()
 
-    hourly["hour_mean_7d"] = (
-        hourly.groupby("hour")["orders"]
-        .transform(lambda s: s.shift(1).rolling(7, min_periods=2).mean())
-    )
-
     return hourly.dropna().reset_index(drop=True)
 
 
 def train_demand_model(orders: pd.DataFrame):
+    """Train an ML benchmark and persist it for comparison."""
     df = build_hourly_series(orders)
     split = int(len(df) * 0.83)
     train, test = df.iloc[:split], df.iloc[split:]
 
     model = HistGradientBoostingRegressor(
-        max_iter=300,
-        learning_rate=0.05,
+        max_iter=250,
+        learning_rate=0.06,
         max_leaf_nodes=31,
         l2_regularization=1.0,
         random_state=42,
@@ -87,44 +81,51 @@ def train_demand_model(orders: pd.DataFrame):
 
 
 def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
-    """Forecast the next 24 hourly order counts."""
-    artifact = joblib.load(MODEL_DIR / "demand_model.joblib")
-    model = artifact["model"]
-    features = artifact.get("features", FEATURES)
+    """Forecast the next 24 hours using a seasonal-naive weekly baseline.
 
+    The project data has a strong repeated hour-of-day/weekday pattern, so the
+    same hour from recent weeks is a more transparent operational forecast than
+    recursively feeding unstable ML predictions back into the model.
+    """
     hourly = build_hourly_series(orders)
-    history = hourly[["order_ts", "orders", "hour"]].copy()
+    raw = (
+        orders.assign(order_ts=pd.to_datetime(orders["order_ts"]))
+        .set_index("order_ts")
+        .resample("h")
+        .agg(orders=("order_id", "count"))
+        .reset_index()
+        .sort_values("order_ts")
+    )
 
-    recent_by_hour = {}
-    for hour in range(24):
-        recent = history.loc[history["hour"] == hour, "orders"].tail(7)
-        recent_by_hour[hour] = float(recent.mean()) if not recent.empty else float(history["orders"].mean())
+    if len(raw) < 24 * 8:
+        raise ValueError("At least 8 weeks of hourly history are required for the weekly seasonal forecast.")
 
+    raw["dow"] = raw["order_ts"].dt.dayofweek
+    raw["hour"] = raw["order_ts"].dt.hour
+
+    # Forecast each future hour from the mean of the same hour across the
+    # previous four matching weekdays, with a small recent-level adjustment.
+    recent_level = float(raw["orders"].tail(24 * 7).mean())
+    overall_level = float(raw["orders"].tail(24 * 28).mean())
+    level_ratio = recent_level / overall_level if overall_level else 1.0
+    level_ratio = float(np.clip(level_ratio, 0.90, 1.10))
+
+    last_ts = raw["order_ts"].iloc[-1]
     rows = []
-    for _ in range(24):
-        ts = history["order_ts"].iloc[-1] + pd.Timedelta(hours=1)
-        vals = history["orders"].to_numpy(dtype=float)
-        hour = int(ts.hour)
-        baseline = recent_by_hour.get(hour, float(vals.mean()))
+    history = raw.set_index("order_ts")["orders"]
 
-        row = {
-            "hour": hour,
-            "dow": ts.dayofweek,
-            "day": ts.day,
-            "month": ts.month,
-            "is_weekend": int(ts.dayofweek >= 5),
-            "lag_1": vals[-1],
-            "lag_24": vals[-24],
-            "lag_168": vals[-168],
-            "rolling_24": float(vals[-24:].mean()),
-            "rolling_168": float(vals[-168:].mean()),
-            "hour_mean_7d": baseline,
-        }
+    for step in range(1, 25):
+        ts = last_ts + pd.Timedelta(hours=step)
+        target_dow = ts.dayofweek
+        target_hour = ts.hour
 
-        model_pred = max(float(model.predict(pd.DataFrame([row])[features])[0]), 0.0)
-        pred = max(0.35 * model_pred + 0.65 * baseline, 0.0)
+        same_slots = raw[
+            (raw["dow"] == target_dow) & (raw["hour"] == target_hour)
+        ].tail(4)
+        seasonal = float(same_slots["orders"].mean()) if not same_slots.empty else recent_level
 
-        rows.append({"order_ts": ts, "forecast_orders": pred})
-        history.loc[len(history)] = [ts, pred, hour]
+        # Mildly adapt the seasonal pattern to the latest weekly level.
+        forecast = max(seasonal * level_ratio, 0.0)
+        rows.append({"order_ts": ts, "forecast_orders": forecast})
 
     return pd.DataFrame(rows)
