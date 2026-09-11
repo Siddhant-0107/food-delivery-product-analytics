@@ -81,13 +81,12 @@ def train_demand_model(orders: pd.DataFrame):
 
 
 def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
-    """Forecast the next 24 hours using a seasonal-naive weekly baseline.
+    """Forecast the next 24 hours using a transparent seasonal baseline.
 
-    The project data has a strong repeated hour-of-day/weekday pattern, so the
-    same hour from recent weeks is a more transparent operational forecast than
-    recursively feeding unstable ML predictions back into the model.
+    Each future hour uses the average order count for the same weekday/hour
+    across the previous four matching weeks, with a clipped recent-level
+    adjustment. The ML model remains available as a benchmark artifact.
     """
-    hourly = build_hourly_series(orders)
     raw = (
         orders.assign(order_ts=pd.to_datetime(orders["order_ts"]))
         .set_index("order_ts")
@@ -103,8 +102,6 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
     raw["dow"] = raw["order_ts"].dt.dayofweek
     raw["hour"] = raw["order_ts"].dt.hour
 
-    # Forecast each future hour from the mean of the same hour across the
-    # previous four matching weekdays, with a small recent-level adjustment.
     recent_level = float(raw["orders"].tail(24 * 7).mean())
     overall_level = float(raw["orders"].tail(24 * 28).mean())
     level_ratio = recent_level / overall_level if overall_level else 1.0
@@ -112,7 +109,6 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
 
     last_ts = raw["order_ts"].iloc[-1]
     rows = []
-    history = raw.set_index("order_ts")["orders"]
 
     for step in range(1, 25):
         ts = last_ts + pd.Timedelta(hours=step)
@@ -122,9 +118,8 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
         same_slots = raw[
             (raw["dow"] == target_dow) & (raw["hour"] == target_hour)
         ].tail(4)
-        seasonal = float(same_slots["orders"].mean()) if not same_slots.empty else recent_level
 
-        # Mildly adapt the seasonal pattern to the latest weekly level.
+        seasonal = float(same_slots["orders"].mean()) if not same_slots.empty else recent_level
         forecast = max(seasonal * level_ratio, 0.0)
         rows.append({"order_ts": ts, "forecast_orders": forecast})
 
