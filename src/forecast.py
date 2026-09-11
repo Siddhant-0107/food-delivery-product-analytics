@@ -48,22 +48,9 @@ def build_hourly_series(orders: pd.DataFrame) -> pd.DataFrame:
     hourly["rolling_24"] = hourly["orders"].shift(1).rolling(24).mean()
     hourly["rolling_168"] = hourly["orders"].shift(1).rolling(168).mean()
 
-    # Stable hour-of-day baseline from the preceding 7 days.
-    hourly["hour_mean_7d"] = (
-        hourly.set_index("order_ts")["orders"]
-        .shift(1)
-        .rolling("7D", min_periods=24)
-        .mean()
-        .groupby(lambda idx: idx.hour if hasattr(idx, "hour") else None)
-        .transform("mean")
-        if False
-        else np.nan
-    )
-
-    # Build the same-day/hour baseline without leaking the current observation.
-    tmp = hourly[["order_ts", "orders", "hour"]].copy()
-    tmp["date"] = tmp["order_ts"].dt.date
-    by_hour_day = tmp.groupby(["date", "hour"], as_index=False)["orders"].mean()
+    # Recent same-hour demand baseline, using only prior days.
+    hourly["date"] = hourly["order_ts"].dt.date
+    by_hour_day = hourly.groupby(["date", "hour"], as_index=False)["orders"].mean()
     by_hour_day["hour_mean_7d"] = by_hour_day.groupby("hour")["orders"].transform(
         lambda s: s.shift(1).rolling(7, min_periods=2).mean()
     )
@@ -74,7 +61,7 @@ def build_hourly_series(orders: pd.DataFrame) -> pd.DataFrame:
         suffixes=("", "_hist"),
     )
     hourly["hour_mean_7d"] = hourly["hour_mean_7d_hist"]
-    hourly.drop(columns=["hour_mean_7d_hist"], inplace=True)
+    hourly.drop(columns=["hour_mean_7d_hist", "date"], inplace=True)
 
     return hourly.dropna().reset_index(drop=True)
 
@@ -117,16 +104,15 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
 
     hourly = build_hourly_series(orders)
     history = hourly[["order_ts", "orders"]].copy()
-    rows = []
 
-    # Historical hour-of-day baseline used for recursive forecasting.
+    # Same-hour baselines from the last seven observed occurrences of each hour.
     history["hour"] = history["order_ts"].dt.hour
-    hour_baseline = history.groupby("hour")["orders"].tail(7).groupby(history.groupby("hour").cumcount()).mean() if False else None
     recent_by_hour = {}
     for hour in range(24):
         recent = history.loc[history["hour"] == hour, "orders"].tail(7)
         recent_by_hour[hour] = float(recent.mean()) if not recent.empty else float(history["orders"].mean())
 
+    rows = []
     for _ in range(24):
         ts = history["order_ts"].iloc[-1] + pd.Timedelta(hours=1)
         vals = history["orders"].to_numpy(dtype=float)
@@ -146,18 +132,18 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
             "hour_mean_7d": recent_by_hour.get(current_hour, float(vals.mean())),
         }
 
-        pred = float(model.predict(pd.DataFrame([row])[features])[0])
-
-        # Keep the forecast anchored to the observed hourly scale while preserving
-        # the model's learned hour/day pattern.
+        model_pred = float(model.predict(pd.DataFrame([row])[features])[0])
         baseline = recent_by_hour.get(current_hour, float(vals.mean()))
-        pred = 0.65 * pred + 0.35 * baseline
+
+        # Blend the learned model with the empirical same-hour baseline so that
+        # the forecast preserves the observed daily demand profile.
+        pred = 0.5 * model_pred + 0.5 * baseline
         pred = max(pred, 0.0)
 
         rows.append({"order_ts": ts, "forecast_orders": pred})
-        history.loc[len(history)] = [ts, pred, current_hour]
-        recent_by_hour[current_hour] = float(
-            np.mean([recent_by_hour.get(current_hour, pred), pred])
+        history = pd.concat(
+            [history, pd.DataFrame([{ "order_ts": ts, "orders": pred, "hour": current_hour }])],
+            ignore_index=True,
         )
 
     return pd.DataFrame(rows)
