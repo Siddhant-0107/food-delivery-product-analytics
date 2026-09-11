@@ -324,6 +324,8 @@ with tabs[2]:
         title="GMV vs delivery time",
     )
     fig.update_layout(height=380)
+    fig.update_xaxes(title_text="Average ETA (min)")
+    fig.update_yaxes(title_text="GMV (₹)", tickprefix="₹", tickformat=",.0f")
     st.plotly_chart(fig, use_container_width=True)
 
     display = score.sort_values("gmv", ascending=False).head(30).copy()
@@ -354,6 +356,8 @@ with tabs[3]:
     counts.columns = ["segment", "customers"]
     fig = px.bar(counts, x="segment", y="customers", title="Behavioral customer segments")
     fig.update_layout(height=320)
+    fig.update_xaxes(title_text="Customer segment")
+    fig.update_yaxes(title_text="Customers")
     st.plotly_chart(fig, use_container_width=True)
 
     cohort = completed.assign(
@@ -363,6 +367,8 @@ with tabs[3]:
     ct = cohort.groupby(["cohort", "order_month"])["user_id"].nunique().reset_index(name="customers")
     fig = px.density_heatmap(ct, x="order_month", y="cohort", z="customers", title="Cohort activity heatmap")
     fig.update_layout(height=420)
+    fig.update_xaxes(title_text="Order month")
+    fig.update_yaxes(title_text="Cohort month")
     st.plotly_chart(fig, use_container_width=True)
     st.info("**Retention lens:** focus on cohorts that generate repeat purchases and segments that contribute disproportionate repeat GMV.")
 
@@ -379,10 +385,14 @@ with tabs[4]:
     with a:
         fig = px.line(by_hour, x="hour", y="cancellation_rate", markers=True, title="Cancellation rate by hour")
         fig.update_layout(height=300)
+        fig.update_xaxes(title_text="Hour of day")
+        fig.update_yaxes(title_text="Cancellation rate (%)")
         st.plotly_chart(fig, use_container_width=True)
     with b:
         fig = px.bar(by_traffic, x="traffic", y="cancellation_rate", text_auto=".1f", title="Cancellation rate by traffic")
         fig.update_layout(height=300)
+        fig.update_xaxes(title_text="Traffic")
+        fig.update_yaxes(title_text="Cancellation rate (%)")
         st.plotly_chart(fig, use_container_width=True)
 
     worst = by_traffic.loc[by_traffic.cancellation_rate.idxmax()]
@@ -442,6 +452,9 @@ with tabs[5]:
     )
     fig = px.line(chart, x="price", y=["expected_revenue", "contribution"], markers=True, title="Revenue vs contribution across feasible prices")
     fig.update_layout(height=340, legend_title_text="")
+    fig.update_xaxes(title_text="Price (₹)")
+    fig.update_yaxes(title_text="Value (₹)", tickprefix="₹", tickformat=",.0f")
+    fig.for_each_trace(lambda trace: trace.update(name="Expected revenue" if trace.name == "expected_revenue" else "Contribution"))
     st.plotly_chart(fig, use_container_width=True)
     st.info("**Pricing guardrail:** maximize modeled contribution subject to the margin floor, then validate any price change with randomized treatment/control groups.")
 
