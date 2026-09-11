@@ -5,7 +5,6 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.forecast import forecast_next_24
 from src.models import load_model
 from src.pricing import optimize_price
 
@@ -291,19 +290,6 @@ with tabs[1]:
     peak_hour = int(hourly.loc[hourly.orders.idxmax(), "hour"])
     peak_orders = int(hourly.loc[hourly.orders.idxmax(), "orders"])
     st.info(f"**Demand signal:** {peak_hour:02d}:00 is the busiest hour with **{peak_orders:,} orders**. Prioritize rider and restaurant capacity during this peak window.")
-
-    fc = None
-    try:
-        fc = forecast_next_24(orders)
-    except Exception as exc:
-        st.warning(f"Demand forecast unavailable: {exc}")
-
-    if fc is not None and not fc.empty:
-        fig = px.line(fc, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast")
-        fig.update_layout(height=300)
-        fig.update_xaxes(title_text="Forecast hour")
-        fig.update_yaxes(title_text="Forecast orders", tickformat=",.0f")
-        st.plotly_chart(fig, use_container_width=True)
 
 with tabs[2]:
     st.subheader("Restaurant performance scorecard")
