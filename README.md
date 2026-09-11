@@ -1,50 +1,63 @@
 # Food Delivery Product Analytics Platform
 
-> Placement-ready Product Analytics project focused on SQL, product metrics, funnels, cohorts, customer segmentation, restaurant performance, experimentation, and pricing decisions.
+> Placement-ready Product Analytics project focused on SQL, product metrics, event funnels, cohorts, customer segmentation, restaurant performance, experimentation, and pricing decisions.
 
 ## Business Problem
 
-A food-delivery marketplace needs a reliable analytics layer to answer where the customer funnel leaks, which customers drive revenue and retention, which restaurants create poor experiences, when demand peaks, what drives cancellations, and whether pricing or promotions improve business outcomes.
+A food-delivery marketplace needs a reliable analytics layer to answer where the customer funnel leaks, which customers drive revenue and retention, which restaurants create poor experiences, when demand peaks, what drives cancellations, and whether pricing or product changes improve business outcomes.
 
-This project simulates an end-to-end product analytics workflow over 250K synthetic orders, turning raw marketplace data into decision-ready KPIs, SQL analysis, dashboards, and recommendations.
+This project simulates an end-to-end product analytics workflow over **250K synthetic orders**, an event-level customer journey, and an A/B-test dataset, turning raw marketplace data into decision-ready KPIs, SQL analysis, dashboards, and recommendations.
 
 ## Product questions answered
 
-1. **How is the marketplace performing?** Orders, GMV, AOV, conversion, cancellation and SLA.
-2. **Where is the funnel leaking?** Session → menu → cart → checkout → order conversion.
-3. **Which customers matter most?** RFM segments, new vs returning behavior and cohort retention.
-4. **Which restaurants need intervention?** Volume, acceptance, preparation time, SLA and cancellation scorecards.
-5. **When does demand peak?** Hour/day and operational demand patterns.
-6. **What happens if pricing changes?** Demand, revenue and margin trade-offs.
-7. **How should a product team measure a change?** A/B-testing style analysis with primary and guardrail metrics.
+1. **How is the marketplace performing?** Orders, GMV, AOV, cancellation and SLA.
+2. **Where is the funnel leaking?** Session → menu → cart → checkout → order conversion from event records.
+3. **Which customers matter most?** Behavioral segments and cohort retention.
+4. **Which restaurants need intervention?** Volume, ETA, rating and cancellation scorecards.
+5. **When does demand peak?** Hour/day demand patterns with rolling trends and supporting forecast analysis.
+6. **What happens if pricing changes?** Demand, revenue and contribution-margin trade-offs.
+7. **How should a product team measure a change?** Randomized experiment readout with conversion as primary metric and cancellation/GMV as guardrails.
 
 ## Analytics stack
 
-- **Python + Pandas** for data generation and transformations
+- **Python + Pandas** for synthetic data generation and transformations
 - **SQL + DuckDB** for analytics and KPI computation
-- **Streamlit + Plotly** for the product dashboard
+- **Streamlit + Plotly** for the decision dashboard
 - **FastAPI** for supporting decision APIs
 - **pytest + GitHub Actions** for quality checks
 - **scikit-learn** only as a supporting decision layer
 
 The main project story is **Business question → Metric → SQL/Analysis → Insight → Recommendation → Measurement**.
 
+## Generated datasets
+
+Running `python generate_data.py` creates:
+
+- `users.csv` — 30K customers and acquisition channels
+- `restaurants.csv` — 900 restaurants, cuisines, ratings and capacity
+- `riders.csv` — 700 delivery partners
+- `orders.csv` — 250K marketplace orders with demand peaks, traffic, weather, ETA, cancellations, discounts and revenue
+- `events.csv` — session-level `session_start → menu_view → add_to_cart → checkout → order` journeys plus abandonment sessions
+- `experiments.csv` — synthetic Control/Treatment checkout experiment with conversion, GMV and cancellation outcomes
+
+The event stream is used directly by the dashboard funnel; funnel numbers are not hard-coded.
+
 ## Dashboard
 
 The dashboard is organized around product decisions rather than model types:
 
-- Executive KPIs
-- Funnel & Demand
-- Restaurant Performance
-- Customers & Retention
-- Cancellations & Risk
-- Pricing & Experiments
+- Executive KPIs — daily metrics plus 7-day rolling trends
+- Funnel & Demand — event funnel, conversion/drop-off, hourly demand and forecast
+- Restaurant Performance — GMV, ETA, cancellations and operational scorecard
+- Customers & Retention — behavioral segments and cohorts
+- Cancellations & Risk — root-cause investigation with optional supporting risk model
+- Pricing & Experiments — contribution-margin pricing simulator and A/B-test readout
 
-## Example product investigation
+## Pricing and experimentation
 
-**Cancellation rate increases.**
+The pricing simulator maximizes modeled contribution subject to a minimum margin floor rather than optimizing revenue alone. The dashboard explicitly labels the simulator as directional and recommends randomized testing for causal validation.
 
-Do not jump straight to a solution. Segment the change by restaurant, hour, geography, customer type, preparation time and delivery time. Identify the largest contributing segment, formulate competing hypotheses, validate them with SQL or experimentation, and recommend an intervention. Monitor cancellation rate alongside completed orders, SLA, rating and retention as guardrails.
+The checkout experiment reports treatment conversion, relative lift, a two-proportion z-test p-value, GMV/session and cancellation guardrails. The experiment is synthetic and exists to demonstrate the analysis workflow.
 
 ## Repository structure
 
@@ -63,6 +76,7 @@ Do not jump straight to a solution. Segment the change by restaurant, hour, geog
 ├── src/
 │   ├── __init__.py
 │   ├── analytics.py
+│   ├── forecast.py
 │   ├── models.py
 │   └── pricing.py
 ├── sql/
@@ -90,10 +104,10 @@ python -m streamlit run app.py
 
 **Food Delivery Product Analytics Platform** | Python, SQL, DuckDB, Streamlit, Plotly
 
-- Built an end-to-end product analytics platform over **250K synthetic food-delivery orders**, defining marketplace KPIs including GMV, AOV, conversion, cancellation, SLA and retention.
-- Developed SQL-driven **funnel, cohort, RFM, customer, restaurant and demand analyses** to identify product and operational opportunities.
-- Built an interactive dashboard to translate marketplace data into **customer, restaurant, demand and pricing insights**, with decision-oriented recommendations and guardrail metrics.
-- Added experimentation and pricing analysis to evaluate **conversion, demand, revenue and margin trade-offs**, using predictive models only as supporting decision tools.
+- Built an end-to-end product analytics platform over **250K synthetic food-delivery orders and event-level customer journeys**, defining marketplace KPIs including GMV, AOV, cancellation, SLA and retention.
+- Developed SQL-driven **funnel, cohort, customer, restaurant and demand analyses** to identify product and operational opportunities.
+- Built an interactive decision dashboard with **7-day trends, event funnel conversion, customer segmentation, restaurant scorecards and cancellation investigations**.
+- Added a contribution-margin pricing simulator and **A/B-test readout with statistical significance and guardrail metrics**, using predictive models only as supporting decision tools.
 
 ## Interview framework
 
