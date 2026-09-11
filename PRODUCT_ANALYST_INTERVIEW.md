@@ -6,7 +6,7 @@
 
 ## Metrics to know
 
-### Acquisition / funnel
+### Funnel
 - Sessions
 - Menu-view rate
 - Cart conversion
@@ -22,7 +22,6 @@
 - SLA/on-time rate
 
 ### Customer
-- DAU/WAU/MAU where applicable
 - Repeat purchase rate
 - Retention
 - Cohort retention
@@ -41,11 +40,11 @@ When a metric moves:
 
 1. Validate the metric definition.
 2. Check whether the movement is real or a data issue.
-3. Compare against historical baseline.
+3. Compare against a historical baseline.
 4. Segment by time, geography, customer, restaurant, and platform.
 5. Identify the largest contributing segment.
 6. Form competing hypotheses.
-7. Test them with SQL/experimentation.
+7. Test them with SQL or experimentation.
 8. Recommend an action.
 9. Define success and guardrail metrics.
 
@@ -53,22 +52,7 @@ When a metric moves:
 
 **Cancellation rate rises from 8% to 11%.**
 
-Do not immediately conclude why.
-
-Break it down by:
-- restaurant
-- hour
-- city/zone
-- new vs returning users
-- delivery time
-- preparation time
-- order value
-
-Then ask:
-
-**Is the increase concentrated in one operational segment?**
-
-If yes, quantify its contribution and recommend an intervention. Measure the intervention using cancellation rate plus completed orders, SLA, customer rating, and retention.
+Do not immediately conclude why. Break it down by restaurant, hour, city/zone, new vs returning users, delivery time, preparation time, and order value. Determine whether the increase is concentrated in one operational segment. Quantify its contribution and recommend an intervention. Measure success using cancellation rate plus completed orders, SLA, customer rating, and retention.
 
 ## SQL questions this project prepares you for
 
@@ -104,4 +88,4 @@ Weak:
 > "Conversion dropped 5%."
 
 Strong:
-> "Checkout conversion dropped 5%, concentrated on Android users after the payment-step change. I would validate payment failures, compare against the control/previous version, and monitor successful payments and cancellation as guardrails before rolling back or fixing the experience."
+> "Checkout conversion dropped 5%, concentrated on Android users after the payment-step change. I would validate payment failures, compare against the control or previous version, and monitor successful payments and cancellation as guardrails before rolling back or fixing the experience."
