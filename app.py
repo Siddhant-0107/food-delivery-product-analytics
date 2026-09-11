@@ -1,86 +1,163 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from src.analytics import query
 from src.models import load_model
 from src.pricing import optimize_price
 from src.forecast import forecast_next_24
 
-st.set_page_config(page_title="Food Delivery Intelligence", layout="wide")
-st.title("🍽️ Food Delivery Intelligence")
-st.caption("Product analytics decision support: KPIs • funnel • retention • restaurant performance • demand • pricing")
-st.caption("Product analytics • ML risk prediction • demand intelligence • pricing simulation")
+st.set_page_config(page_title="Food Delivery Product Analytics", page_icon="🍽️", layout="wide")
+st.title("🍽️ Food Delivery Product Analytics")
+st.caption("Marketplace performance • Customer behavior • Retention • Operations • Pricing")
 
-orders = pd.read_csv("data/orders.csv")
+orders = pd.read_csv("data/orders.csv", parse_dates=["order_ts"])
 restaurants = pd.read_csv("data/restaurants.csv")
 
-kpi = query(open("sql/kpis.sql").read()).iloc[0]
-c1,c2,c3,c4,c5 = st.columns(5)
-c1.metric("Orders", f"{int(kpi.orders):,}")
-c2.metric("Delivery rate", f"{kpi.delivery_rate_pct:.1f}%")
-c3.metric("Cancellation", f"{kpi.cancellation_rate_pct:.1f}%")
-c4.metric("Avg ETA", f"{kpi.avg_eta_minutes:.1f} min")
-c5.metric("Revenue", f"₹{kpi.total_revenue:,.0f}")
+try:
+    events = pd.read_csv("data/events.csv", parse_dates=["event_ts"])
+except FileNotFoundError:
+    events = None
 
+st.sidebar.header("Analysis filters")
+min_date, max_date = orders.order_ts.min().date(), orders.order_ts.max().date()
+date_range = st.sidebar.date_input("Order date", (min_date, max_date), min_value=min_date, max_value=max_date)
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    start_date = end_date = date_range
+cuisine = st.sidebar.selectbox("Cuisine", ["All"] + sorted(restaurants.cuisine.unique().tolist()))
+traffic = st.sidebar.selectbox("Traffic", ["All"] + sorted(orders.traffic.unique().tolist()))
+
+filtered = orders[orders.order_ts.dt.date.between(start_date, end_date)].copy()
+if traffic != "All":
+    filtered = filtered[filtered.traffic == traffic]
+if cuisine != "All":
+    filtered = filtered.merge(restaurants[["restaurant_id", "cuisine"]], on="restaurant_id", how="inner")
+    filtered = filtered[filtered.cuisine == cuisine]
+
+if filtered.empty:
+    st.warning("No orders match the selected filters.")
+    st.stop()
+
+def money(x):
+    x = float(x)
+    if x >= 1_000_000: return f"₹{x/1_000_000:.1f}M"
+    if x >= 1_000: return f"₹{x/1_000:.1f}K"
+    return f"₹{x:,.0f}"
+
+total_orders = len(filtered)
+delivered = int(filtered.delivered.sum())
+cancel_rate = filtered.cancelled.mean() * 100
+aov = filtered.loc[filtered.delivered == 1, "revenue"].mean()
+gmv = filtered.loc[filtered.delivered == 1, "revenue"].sum()
+sla = (filtered.loc[filtered.delivered == 1, "eta_minutes"] <= 45).mean() * 100 if delivered else 0
+
+st.subheader("Marketplace snapshot")
+k1,k2,k3,k4,k5,k6 = st.columns(6)
+k1.metric("Orders", f"{total_orders:,}")
+k2.metric("GMV", money(gmv))
+k3.metric("AOV", money(aov))
+k4.metric("Cancellation", f"{cancel_rate:.1f}%")
+k5.metric("Delivery rate", f"{100-cancel_rate:.1f}%")
+k6.metric("≤45 min SLA", f"{sla:.1f}%")
+
+st.caption("Decision framework: metric → trend → segmentation → insight → recommendation")
 tabs = st.tabs(["Executive KPIs","Funnel & Demand","Restaurant Performance","Customers & Retention","Cancellations & Risk","Pricing & Experiments"])
 
 with tabs[0]:
-    daily = orders.assign(date=pd.to_datetime(orders.order_ts).dt.date).groupby("date",as_index=False).agg(
-        orders=("order_id","count"), revenue=("revenue","sum"), eta=("eta_minutes","mean"))
-    st.plotly_chart(px.line(daily, x="date", y=["orders","revenue"], title="Daily orders and revenue"), use_container_width=True)
-    st.plotly_chart(px.line(daily, x="date", y="eta", title="Average ETA"), use_container_width=True)
+    st.subheader("Marketplace performance")
+    daily = filtered.assign(date=filtered.order_ts.dt.date).groupby("date", as_index=False).agg(orders=("order_id","count"), gmv=("revenue","sum"), cancellation_rate=("cancelled","mean"), avg_eta=("eta_minutes","mean"))
+    daily["cancellation_rate"] *= 100
+    a,b = st.columns(2)
+    with a: st.plotly_chart(px.line(daily, x="date", y="orders", markers=True, title="Daily orders"), use_container_width=True)
+    with b: st.plotly_chart(px.line(daily, x="date", y="gmv", markers=True, title="Daily GMV"), use_container_width=True)
+    a,b = st.columns(2)
+    with a: st.plotly_chart(px.line(daily, x="date", y="cancellation_rate", title="Cancellation trend"), use_container_width=True)
+    with b: st.plotly_chart(px.line(daily, x="date", y="avg_eta", title="Average delivery ETA"), use_container_width=True)
+    peak = daily.loc[daily.orders.idxmax()]
+    worst = daily.loc[daily.cancellation_rate.idxmax()]
+    st.markdown("### Product insights")
+    x,y = st.columns(2)
+    x.info(f"**Peak demand:** {peak.date} recorded **{int(peak.orders):,} orders**.")
+    y.warning(f"**Highest cancellation:** {worst.date} reached **{worst.cancellation_rate:.1f}%**. Segment by hour, traffic and restaurant before acting.")
 
 with tabs[1]:
-    hourly = orders.groupby("hour",as_index=False).agg(orders=("order_id","count"), revenue=("revenue","sum"))
-    st.plotly_chart(px.bar(hourly, x="hour", y="orders", title="Order demand by hour"), use_container_width=True)
-    forecast = forecast_next_24(orders)
-    st.plotly_chart(px.line(forecast, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast"), use_container_width=True)
-    st.dataframe(hourly, use_container_width=True)
+    st.subheader("Funnel & demand")
+    if events is not None:
+        ev = events[events.event_ts.dt.date.between(start_date, end_date)].copy()
+        funnel_order = ["session_start","menu_view","add_to_cart","checkout","order"]
+        counts = ev[ev.event_name.isin(funnel_order)].groupby("event_name")["session_id"].nunique().reindex(funnel_order).fillna(0)
+        funnel = pd.DataFrame({"stage": funnel_order, "sessions": counts.values})
+        funnel["step_conversion"] = funnel.sessions.div(funnel.sessions.shift(1)).fillna(1) * 100
+        st.plotly_chart(px.funnel(funnel, y="stage", x="sessions", title="Customer journey funnel"), use_container_width=True)
+        leak = funnel.iloc[1:].sort_values("step_conversion").iloc[0]
+        st.info(f"**Largest leakage:** {leak.stage.replace('_',' ').title()} retains **{leak.step_conversion:.1f}%** of the previous stage. This is the first area to investigate.")
+    else:
+        st.warning("Funnel data is missing. Pull the latest repository and rerun `python generate_data.py` to create events.csv.")
+    hourly = filtered.groupby("hour", as_index=False).agg(orders=("order_id","count"), gmv=("revenue","sum"))
+    st.plotly_chart(px.bar(hourly, x="hour", y="orders", title="Orders by hour of day"), use_container_width=True)
+    peak_hour = int(hourly.loc[hourly.orders.idxmax(), "hour"])
+    st.info(f"**Demand signal:** {peak_hour}:00 is the busiest hour in the selected period. Use this window for capacity planning and controlled promotions.")
+    try:
+        fc = forecast_next_24(orders)
+        st.plotly_chart(px.line(fc, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast (supporting analysis)"), use_container_width=True)
+    except Exception:
+        pass
 
 with tabs[2]:
-    perf = query(open("sql/restaurant_performance.sql").read())
-    st.plotly_chart(px.scatter(perf, x="avg_eta", y="revenue", size="orders", color="cuisine",
-                               hover_name="restaurant_id", title="Restaurant revenue vs delivery speed"),
-                    use_container_width=True)
-    st.dataframe(perf.head(30), use_container_width=True)
+    st.subheader("Restaurant performance scorecard")
+    perf = filtered.merge(restaurants, on="restaurant_id", how="left")
+    score = perf.groupby(["restaurant_id","cuisine"], as_index=False).agg(orders=("order_id","count"), gmv=("revenue","sum"), cancellation_rate=("cancelled","mean"), avg_eta=("eta_minutes","mean"), rating=("rating","first"))
+    score["cancellation_rate"] *= 100
+    score["status"] = "Healthy"
+    score.loc[(score.cancellation_rate >= score.cancellation_rate.quantile(.9)) | (score.avg_eta >= score.avg_eta.quantile(.9)), "status"] = "Needs attention"
+    st.plotly_chart(px.scatter(score, x="avg_eta", y="gmv", size="orders", color="cuisine", hover_name="restaurant_id", title="GMV vs delivery time"), use_container_width=True)
+    display = score.sort_values("gmv", ascending=False).head(30).copy()
+    display["gmv"] = display.gmv.round(0)
+    display["cancellation_rate"] = display.cancellation_rate.round(1)
+    display["avg_eta"] = display.avg_eta.round(1)
+    st.dataframe(display[["restaurant_id","cuisine","orders","gmv","avg_eta","cancellation_rate","rating","status"]], use_container_width=True, hide_index=True)
+    st.info("**Action lens:** prioritize restaurants that combine high order volume with poor ETA or cancellation performance, because they create a larger marketplace impact.")
 
 with tabs[3]:
-    seg = query(open("sql/customer_segments.sql").read())
-    counts = seg.segment.value_counts().reset_index()
-    counts.columns = ["segment","customers"]
-    st.plotly_chart(px.bar(counts, x="segment", y="customers", title="Customer segments"), use_container_width=True)
-    st.dataframe(seg.sort_values("monetary", ascending=False).head(50), use_container_width=True)
+    st.subheader("Customers & retention")
+    completed = filtered[filtered.delivered == 1].copy()
+    customer = completed.groupby("user_id", as_index=False).agg(orders=("order_id","count"), revenue=("revenue","sum"), last_order=("order_ts","max"))
+    customer["segment"] = "Occasional"
+    customer.loc[customer.orders == 1, "segment"] = "New / one-time"
+    customer.loc[(customer.orders >= 2) & (customer.orders <= 3), "segment"] = "Repeat"
+    customer.loc[(customer.orders >= 4) & (customer.revenue >= customer.revenue.median()), "segment"] = "Loyal high-value"
+    counts = customer.segment.value_counts().reset_index(); counts.columns = ["segment","customers"]
+    st.plotly_chart(px.bar(counts, x="segment", y="customers", title="Behavioral customer segments"), use_container_width=True)
+    cohort = completed.assign(cohort=completed.groupby("user_id")["order_ts"].transform("min").dt.to_period("M").astype(str), order_month=completed.order_ts.dt.to_period("M").astype(str))
+    ct = cohort.groupby(["cohort","order_month"])["user_id"].nunique().reset_index(name="customers")
+    st.plotly_chart(px.density_heatmap(ct, x="order_month", y="cohort", z="customers", title="Cohort activity heatmap"), use_container_width=True)
+    st.info("**Retention lens:** identify which cohorts retain beyond the first purchase and which segments contribute the most repeat GMV.")
 
 with tabs[4]:
-    model = load_model("cancel_model.joblib")
-    st.subheader("Cancellation-risk simulator")
-    col1,col2,col3 = st.columns(3)
-    distance = col1.slider("Distance (km)", .5, 14.0, 4.0)
-    items = col2.slider("Items", 1, 6, 2)
-    basket = col3.slider("Basket value (₹)", 120, 2500, 600)
-    traffic = st.selectbox("Traffic", ["Low","Medium","High"])
-    weather = st.selectbox("Weather", ["Clear","Cloudy","Rain"])
-    hour = st.slider("Order hour", 0, 23, 20)
-    weekend = st.checkbox("Weekend")
-    x = pd.DataFrame([{
-        "distance_km":distance,"items":items,"basket_value":basket,"hour":hour,
-        "weekend":int(weekend),"traffic":{"Low":0,"Medium":1,"High":2}[traffic],
-        "weather":{"Clear":0,"Cloudy":1,"Rain":2}[weather]
-    }])
-    risk = float(model.predict_proba(x)[:,1][0])
-    st.metric("Predicted cancellation risk", f"{risk*100:.1f}%")
+    st.subheader("Cancellation investigation")
+    by_hour = filtered.groupby("hour", as_index=False).agg(cancellation_rate=("cancelled","mean"), orders=("order_id","count")); by_hour["cancellation_rate"] *= 100
+    by_traffic = filtered.groupby("traffic", as_index=False).agg(cancellation_rate=("cancelled","mean"), orders=("order_id","count")); by_traffic["cancellation_rate"] *= 100
+    a,b = st.columns(2)
+    with a: st.plotly_chart(px.line(by_hour, x="hour", y="cancellation_rate", markers=True, title="Cancellation rate by hour"), use_container_width=True)
+    with b: st.plotly_chart(px.bar(by_traffic, x="traffic", y="cancellation_rate", text_auto=".1f", title="Cancellation rate by traffic"), use_container_width=True)
+    worst = by_traffic.loc[by_traffic.cancellation_rate.idxmax()]
+    st.warning(f"**Investigation lead:** {worst.traffic} traffic has the highest cancellation rate (**{worst.cancellation_rate:.1f}%**). Segment by restaurant, distance and peak hour before recommending a fix.")
+    try:
+        model = load_model("cancel_model.joblib")
+        with st.expander("Optional cancellation-risk simulator"):
+            c1,c2,c3 = st.columns(3)
+            distance=c1.slider("Distance (km)",.5,14.0,4.0); items=c2.slider("Items",1,6,2); basket=c3.slider("Basket value (₹)",120,2500,600)
+            traffic2=st.selectbox("Traffic",["Low","Medium","High"]); weather=st.selectbox("Weather",["Clear","Cloudy","Rain"]); hour=st.slider("Order hour",0,23,20); weekend=st.checkbox("Weekend")
+            x=pd.DataFrame([{"distance_km":distance,"items":items,"basket_value":basket,"hour":hour,"weekend":int(weekend),"traffic":{"Low":0,"Medium":1,"High":2}[traffic2],"weather":{"Clear":0,"Cloudy":1,"Rain":2}[weather]}])
+            risk=float(model.predict_proba(x)[:,1][0]); st.metric("Estimated cancellation risk",f"{risk*100:.1f}%")
+    except Exception: pass
 
 with tabs[5]:
-    st.subheader("Revenue-maximizing what-if pricing")
-    a,b,c = st.columns(3)
-    reference = a.number_input("Current price (₹)", 100.0, 3000.0, 399.0)
-    demand = b.number_input("Estimated baseline demand", 1.0, 10000.0, 350.0)
-    cost = c.number_input("Unit cost (₹)", 10.0, 2500.0, 180.0)
-    result = optimize_price(reference, demand, cost)
-    st.metric("Recommended price", f"₹{result['recommended_price']:.0f}")
-    st.metric("Expected demand", f"{result['expected_demand']:.0f}")
-    st.metric("Expected revenue", f"₹{result['expected_revenue']:,.0f}")
-    chart = pd.DataFrame({"price":result["price_grid"],"expected_revenue":result["revenue_grid"]})
-    st.plotly_chart(px.line(chart, x="price", y="expected_revenue", markers=True,
-                            title="Revenue across feasible prices"), use_container_width=True)
-    st.info("This is a simulation using an explicit elasticity assumption; it is not a causal estimate.")
+    st.subheader("Pricing & experiments")
+    st.markdown("Evaluate **demand, revenue, margin and customer impact** together.")
+    a,b,c=st.columns(3); reference=a.number_input("Current price (₹)",100.0,3000.0,399.0); demand=b.number_input("Baseline demand",1.0,10000.0,350.0); cost=c.number_input("Unit cost (₹)",10.0,2500.0,180.0)
+    result=optimize_price(reference,demand,cost)
+    p1,p2,p3=st.columns(3); p1.metric("Scenario price",f"₹{result['recommended_price']:.0f}"); p2.metric("Expected demand",f"{result['expected_demand']:.0f}"); p3.metric("Expected revenue",money(result['expected_revenue']))
+    chart=pd.DataFrame({"price":result["price_grid"],"expected_revenue":result["revenue_grid"]})
+    st.plotly_chart(px.line(chart,x="price",y="expected_revenue",markers=True,title="Revenue across feasible prices"),use_container_width=True)
+    st.info("**Experiment design:** test pricing changes with randomized treatment/control groups. Primary metrics could be conversion or contribution margin; guardrails should include cancellations, retention and customer experience. The simulator is not a causal estimate.")
