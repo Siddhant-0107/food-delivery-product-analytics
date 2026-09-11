@@ -51,9 +51,6 @@ try:
 except FileNotFoundError:
     experiments = None
 
-# -----------------------------
-# Filters
-# -----------------------------
 st.sidebar.header("Analysis controls")
 min_date = orders.order_ts.min().date()
 max_date = orders.order_ts.max().date()
@@ -169,9 +166,6 @@ tabs = st.tabs([
     "Pricing & Experiments",
 ])
 
-# -----------------------------
-# Executive
-# -----------------------------
 with tabs[0]:
     st.subheader("Marketplace performance")
     st.markdown('<div class="section-note">Track volume, monetization and service quality without mixing unrelated scales.</div>', unsafe_allow_html=True)
@@ -234,9 +228,6 @@ with tabs[0]:
             unsafe_allow_html=True,
         )
 
-# -----------------------------
-# Funnel + demand
-# -----------------------------
 with tabs[1]:
     st.subheader("Funnel & demand")
     st.markdown('<div class="section-note">Identify where sessions leak before spending more on acquisition.</div>', unsafe_allow_html=True)
@@ -301,19 +292,19 @@ with tabs[1]:
     peak_orders = int(hourly.loc[hourly.orders.idxmax(), "orders"])
     st.info(f"**Demand signal:** {peak_hour:02d}:00 is the busiest hour with **{peak_orders:,} orders**. Prioritize rider and restaurant capacity during this peak window.")
 
+    fc = None
     try:
         fc = forecast_next_24(orders)
+    except Exception as exc:
+        st.warning(f"Demand forecast unavailable: {exc}")
+
+    if fc is not None and not fc.empty:
         fig = px.line(fc, x="order_ts", y="forecast_orders", markers=True, title="Next 24-hour demand forecast")
         fig.update_layout(height=300)
         fig.update_xaxes(title_text="Forecast hour")
         fig.update_yaxes(title_text="Forecast orders")
         st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        pass
 
-# -----------------------------
-# Restaurants
-# -----------------------------
 with tabs[2]:
     st.subheader("Restaurant performance scorecard")
     st.markdown('<div class="section-note">Prioritize high-volume restaurants where operational issues have the largest marketplace impact.</div>', unsafe_allow_html=True)
@@ -359,9 +350,6 @@ with tabs[2]:
         hide_index=True,
     )
 
-# -----------------------------
-# Customers
-# -----------------------------
 with tabs[3]:
     st.subheader("Customers & retention")
     st.markdown('<div class="section-note">Separate one-time users from repeat and high-value customers to guide retention investment.</div>', unsafe_allow_html=True)
@@ -392,9 +380,6 @@ with tabs[3]:
     st.plotly_chart(fig, use_container_width=True)
     st.info("**Retention lens:** focus on cohorts that generate repeat purchases and segments that contribute disproportionate repeat GMV.")
 
-# -----------------------------
-# Cancellations
-# -----------------------------
 with tabs[4]:
     st.subheader("Cancellation investigation")
     st.markdown('<div class="section-note">Treat cancellation as an investigation problem: isolate the operational driver before recommending an intervention.</div>', unsafe_allow_html=True)
@@ -446,9 +431,6 @@ with tabs[4]:
     except Exception:
         pass
 
-# -----------------------------
-# Pricing + experiments
-# -----------------------------
 with tabs[5]:
     st.subheader("Pricing & experiments")
     st.markdown('<div class="section-note">Evaluate revenue, contribution margin and customer impact together; do not optimize price on revenue alone.</div>', unsafe_allow_html=True)
