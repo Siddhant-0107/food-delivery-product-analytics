@@ -14,7 +14,7 @@ This project simulates an end-to-end product analytics workflow over **250K synt
 2. **Where is the funnel leaking?** Session → menu → cart → checkout → order conversion from event records.
 3. **Which customers matter most?** Behavioral segments and cohort retention.
 4. **Which restaurants need intervention?** Volume, ETA, rating and cancellation scorecards.
-5. **When does demand peak?** Hour/day demand patterns with rolling trends and supporting forecast analysis.
+5. **When does demand peak?** Hour/day demand patterns with rolling trends and peak-demand analysis.
 6. **What happens if pricing changes?** Demand, revenue and contribution-margin trade-offs.
 7. **How should a product team measure a change?** Randomized experiment readout with conversion as primary metric and cancellation/GMV as guardrails.
 
@@ -47,7 +47,7 @@ The event stream is used directly by the dashboard funnel; funnel numbers are no
 The dashboard is organized around product decisions rather than model types:
 
 - Executive KPIs — daily metrics plus 7-day rolling trends
-- Funnel & Demand — event funnel, conversion/drop-off, hourly demand and forecast
+- Funnel & Demand — event funnel, conversion/drop-off and hourly demand analysis
 - Restaurant Performance — GMV, ETA, cancellations and operational scorecard
 - Customers & Retention — behavioral segments and cohorts
 - Cancellations & Risk — root-cause investigation with optional supporting risk model
@@ -55,7 +55,7 @@ The dashboard is organized around product decisions rather than model types:
 
 ## Pricing and experimentation
 
-The pricing simulator maximizes modeled contribution subject to a minimum margin floor rather than optimizing revenue alone. The dashboard explicitly labels the simulator as directional and recommends randomized testing for causal validation.
+The pricing simulator maximizes modeled contribution subject to a minimum margin floor rather than optimizing revenue alone. The dashboard explicitly treats the simulator as directional and recommends randomized testing for causal validation.
 
 The checkout experiment reports treatment conversion, relative lift, a two-proportion z-test p-value, GMV/session and cancellation guardrails. The experiment is synthetic and exists to demonstrate the analysis workflow.
 
@@ -76,7 +76,6 @@ The checkout experiment reports treatment conversion, relative lift, a two-propo
 ├── src/
 │   ├── __init__.py
 │   ├── analytics.py
-│   ├── forecast.py
 │   ├── models.py
 │   └── pricing.py
 ├── sql/
