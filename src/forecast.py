@@ -48,7 +48,6 @@ def build_hourly_series(orders: pd.DataFrame) -> pd.DataFrame:
     hourly["rolling_24"] = hourly["orders"].shift(1).rolling(24).mean()
     hourly["rolling_168"] = hourly["orders"].shift(1).rolling(168).mean()
 
-    # Prior 7 observed occurrences of the same hour-of-day.
     hourly["hour_mean_7d"] = (
         hourly.groupby("hour")["orders"]
         .transform(lambda s: s.shift(1).rolling(7, min_periods=2).mean())
@@ -88,7 +87,7 @@ def train_demand_model(orders: pd.DataFrame):
 
 
 def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
-    """Forecast the next 24 hourly order counts from the latest observed hour."""
+    """Forecast the next 24 hourly order counts."""
     artifact = joblib.load(MODEL_DIR / "demand_model.joblib")
     model = artifact["model"]
     features = artifact.get("features", FEATURES)
@@ -96,7 +95,6 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
     hourly = build_hourly_series(orders)
     history = hourly[["order_ts", "orders", "hour"]].copy()
 
-    # Same-hour demand baseline from the last seven observed days.
     recent_by_hour = {}
     for hour in range(24):
         recent = history.loc[history["hour"] == hour, "orders"].tail(7)
@@ -106,10 +104,11 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
     for _ in range(24):
         ts = history["order_ts"].iloc[-1] + pd.Timedelta(hours=1)
         vals = history["orders"].to_numpy(dtype=float)
-        current_hour = int(ts.hour)
+        hour = int(ts.hour)
+        baseline = recent_by_hour.get(hour, float(vals.mean()))
 
         row = {
-            "hour": current_hour,
+            "hour": hour,
             "dow": ts.dayofweek,
             "day": ts.day,
             "month": ts.month,
@@ -119,14 +118,13 @@ def forecast_next_24(orders: pd.DataFrame) -> pd.DataFrame:
             "lag_168": vals[-168],
             "rolling_24": float(vals[-24:].mean()),
             "rolling_168": float(vals[-168:].mean()),
-            "hour_mean_7d": recent_by_hour.get(current_hour, float(vals.mean())),
+            "hour_mean_7d": baseline,
         }
 
-        model_pred = float(model.predict(pd.DataFrame([row])[features])[0])
-        baseline = recent_by_hour.get(current_hour, float(vals.mean()))
-        pred = max(0.5 * model_pred + 0.5 * baseline, 0.0)
+        model_pred = max(float(model.predict(pd.DataFrame([row])[features])[0]), 0.0)
+        pred = max(0.35 * model_pred + 0.65 * baseline, 0.0)
 
         rows.append({"order_ts": ts, "forecast_orders": pred})
-        history.loc[len(history)] = [ts, pred, current_hour]
+        history.loc[len(history)] = [ts, pred, hour]
 
     return pd.DataFrame(rows)
