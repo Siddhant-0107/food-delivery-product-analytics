@@ -43,7 +43,7 @@ def test_funnel_stage_conversion_is_adjacent_stage_rate():
     )
     conversion = stages.div(stages.shift(1)).fillna(1) * 100
     assert conversion["menu_view"] == 80.0
-    assert conversion["add_to_cart"] == 55.0
+    assert round(conversion["add_to_cart"], 10) == 55.0
     assert conversion["order"] == 80.0
 
 
