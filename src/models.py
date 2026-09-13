@@ -5,6 +5,13 @@ from sklearn.ensemble import HistGradientBoostingRegressor, HistGradientBoosting
 from sklearn.metrics import mean_absolute_error, roc_auc_score
 from sklearn.model_selection import train_test_split
 
+# Streamlit Cloud does not retain locally generated data/model artifacts.
+# Generate the synthetic dataset on first startup so the dashboard can run
+# without committing large generated CSV files to GitHub.
+if not Path('data/orders.csv').exists():
+    from generate_data import main as generate_data
+    generate_data()
+
 MODEL_DIR = Path('models')
 MODEL_DIR.mkdir(exist_ok=True)
 
