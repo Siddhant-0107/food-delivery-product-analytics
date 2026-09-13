@@ -8,12 +8,16 @@ from sklearn.model_selection import train_test_split
 # Streamlit Cloud does not retain locally generated data/model artifacts.
 # Generate the synthetic dataset on first startup so the dashboard can run
 # without committing large generated CSV files to GitHub.
-if not Path('data/orders.csv').exists():
-    from generate_data import main as generate_data
-    generate_data()
-
-MODEL_DIR = Path('models')
+DATA_DIR = Path("data")
+MODEL_DIR = Path("models")
+DATA_DIR.mkdir(exist_ok=True)
 MODEL_DIR.mkdir(exist_ok=True)
+
+
+def _ensure_data():
+    if not (DATA_DIR / "orders.csv").exists():
+        from generate_data import main as generate_data
+        generate_data()
 
 
 def _features(df):
@@ -40,4 +44,15 @@ def train_models(orders):
 
 
 def load_model(name):
-    return joblib.load(MODEL_DIR / name)
+    _ensure_data()
+    model_path = MODEL_DIR / name
+    if not model_path.exists():
+        orders = pd.read_csv(DATA_DIR / 'orders.csv')
+        train_models(orders)
+    return joblib.load(model_path)
+
+
+# Prepare artifacts automatically when the module is imported by the dashboard.
+_ensure_data()
+if not (MODEL_DIR / 'eta_model.joblib').exists() or not (MODEL_DIR / 'cancel_model.joblib').exists():
+    train_models(pd.read_csv(DATA_DIR / 'orders.csv'))
